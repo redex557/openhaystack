@@ -16,6 +16,8 @@ public class AnisetteDataManager: NSObject {
     private var anisetteDataCompletionHandlers: [String: (Result<AppleAccountData, Error>) -> Void] = [:]
     private var anisetteDataTimers: [String: Timer] = [:]
 
+    let notificationQueue = OperationQueue()
+
     private override init() {
         super.init()
 
@@ -23,8 +25,12 @@ public class AnisetteDataManager: NSObject {
 
         DistributedNotificationCenter.default()
             .addObserver(
-                self, selector: #selector(AnisetteDataManager.handleAppleDataResponse(_:)),
-                name: Notification.Name("de.tu-darmstadt.seemoo.OpenHaystack.AnisetteDataResponse"), object: nil)
+                forName: Notification.Name("de.tu-darmstadt.seemoo.OpenHaystack.AnisetteDataResponse"),
+                object: nil, queue: notificationQueue
+            ) { notification in
+                self.handleAppleDataResponse(notification)
+            }
+
     }
 
     func requestAnisetteData(_ completion: @escaping (Result<AppleAccountData, Error>) -> Void) {
@@ -108,7 +114,7 @@ public class AnisetteDataManager: NSObject {
 
 extension AnisetteDataManager {
 
-    @objc fileprivate func handleAppleDataResponse(_ notification: Notification) {
+    @objc func handleAppleDataResponse(_ notification: Notification) {
         guard let userInfo = notification.userInfo, let requestUUID = userInfo["requestUUID"] as? String else { return }
 
         if let archivedAnisetteData = userInfo["anisetteData"] as? Data,
@@ -121,26 +127,6 @@ extension AnisetteDataManager {
                 appleAccountData.deviceDescription = String(adjustedDescription)
             }
 
-            self.finishRequest(forUUID: requestUUID, result: .success(appleAccountData))
-        } else {
-            self.finishRequest(forUUID: requestUUID, result: .failure(AnisetteDataError.invalidAnisetteData))
-        }
-    }
-
-    @objc fileprivate func handleAnisetteDataResponse(_ notification: Notification) {
-        guard let userInfo = notification.userInfo, let requestUUID = userInfo["requestUUID"] as? String else { return }
-
-        if let archivedAnisetteData = userInfo["anisetteData"] as? Data,
-            let anisetteData = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ALTAnisetteData.self, from: archivedAnisetteData)
-        {
-            if let range = anisetteData.deviceDescription.lowercased().range(of: "(com.apple.mail") {
-                var adjustedDescription = anisetteData.deviceDescription[..<range.lowerBound]
-                adjustedDescription += "(com.apple.dt.Xcode/3594.4.19)>"
-
-                anisetteData.deviceDescription = String(adjustedDescription)
-            }
-
-            let appleAccountData = AppleAccountData(fromALTAnissetteData: anisetteData)
             self.finishRequest(forUUID: requestUUID, result: .success(appleAccountData))
         } else {
             self.finishRequest(forUUID: requestUUID, result: .failure(AnisetteDataError.invalidAnisetteData))
